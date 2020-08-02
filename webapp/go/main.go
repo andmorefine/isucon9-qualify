@@ -335,7 +335,7 @@ func main() {
 		dbname,
 	)
 
-	dbx, err = sqlx.Open("mysql", dsn)
+	dbx, err = sqlx.Open("nrmysql", dsn)
 	if err != nil {
 		log.Fatalf("failed to connect to DB: %s.", err.Error())
 	}
@@ -414,7 +414,8 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 		return user, http.StatusNotFound, "no session"
 	}
 
-	err := dbx.Get(&user, "SELECT * FROM `users` WHERE `id` = ?", userID)
+	ctx := r.Context()
+	err := dbx.GetContext(ctx, &user, "SELECT * FROM `users` WHERE `id` = ?", userID)
 	if err == sql.ErrNoRows {
 		return user, http.StatusNotFound, "user not found"
 	}
@@ -450,9 +451,10 @@ func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err err
 	return category, err
 }
 
-func getConfigByName(name string) (string, error) {
+func getConfigByName(name string, r *http.Request) (string, error) {
 	config := Config{}
-	err := dbx.Get(&config, "SELECT * FROM `configs` WHERE `name` = ?", name)
+	ctx := r.Context()
+	err := dbx.GetContext(ctx, &config, "SELECT * FROM `configs` WHERE `name` = ?", name)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -463,16 +465,16 @@ func getConfigByName(name string) (string, error) {
 	return config.Val, err
 }
 
-func getPaymentServiceURL() string {
-	val, _ := getConfigByName("payment_service_url")
+func getPaymentServiceURL(r *http.Request) string {
+	val, _ := getConfigByName("payment_service_url", r)
 	if val == "" {
 		return DefaultPaymentServiceURL
 	}
 	return val
 }
 
-func getShipmentServiceURL() string {
-	val, _ := getConfigByName("shipment_service_url")
+func getShipmentServiceURL(r *http.Request) string {
+	val, _ := getConfigByName("shipment_service_url", r)
 	if val == "" {
 		return DefaultShipmentServiceURL
 	}
@@ -559,7 +561,8 @@ func getNewItems(w http.ResponseWriter, r *http.Request) {
 	items := []Item{}
 	if itemID > 0 && createdAt > 0 {
 		// paging
-		err := dbx.Select(&items,
+		ctx := r.Context()
+		err := dbx.SelectContext(ctx, &items,
 			"SELECT * FROM `items` WHERE `status` IN (?,?) AND (`created_at` < ?  OR (`created_at` <= ? AND `id` < ?)) ORDER BY `created_at` DESC, `id` DESC LIMIT ?",
 			ItemStatusOnSale,
 			ItemStatusSoldOut,
@@ -575,7 +578,8 @@ func getNewItems(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// 1st page
-		err := dbx.Select(&items,
+		ctx := r.Context()
+		err := dbx.SelectContext(ctx, &items,
 			"SELECT * FROM `items` WHERE `status` IN (?,?) ORDER BY `created_at` DESC, `id` DESC LIMIT ?",
 			ItemStatusOnSale,
 			ItemStatusSoldOut,
@@ -644,7 +648,8 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var categoryIDs []int
-	err = dbx.Select(&categoryIDs, "SELECT id FROM `categories` WHERE parent_id=?", rootCategory.ID)
+	ctx := r.Context()
+	err = dbx.SelectContext(ctx, &categoryIDs, "SELECT id FROM `categories` WHERE parent_id=?", rootCategory.ID)
 	if err != nil {
 		log.Print(err)
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
@@ -708,7 +713,8 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := []Item{}
-	err = dbx.Select(&items, inQuery, inArgs...)
+	ctx = r.Context()
+	err = dbx.SelectContext(ctx, &items, inQuery, inArgs...)
 
 	if err != nil {
 		log.Print(err)
@@ -798,7 +804,8 @@ func getUserItems(w http.ResponseWriter, r *http.Request) {
 	items := []Item{}
 	if itemID > 0 && createdAt > 0 {
 		// paging
-		err := dbx.Select(&items,
+		ctx := r.Context()
+		err := dbx.SelectContext(ctx, &items,
 			"SELECT * FROM `items` WHERE `seller_id` = ? AND `status` IN (?,?,?) AND (`created_at` < ?  OR (`created_at` <= ? AND `id` < ?)) ORDER BY `created_at` DESC, `id` DESC LIMIT ?",
 			userSimple.ID,
 			ItemStatusOnSale,
@@ -816,7 +823,8 @@ func getUserItems(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// 1st page
-		err := dbx.Select(&items,
+		ctx := r.Context()
+		err := dbx.SelectContext(ctx, &items,
 			"SELECT * FROM `items` WHERE `seller_id` = ? AND `status` IN (?,?,?) ORDER BY `created_at` DESC, `id` DESC LIMIT ?",
 			userSimple.ID,
 			ItemStatusOnSale,
@@ -1012,7 +1020,7 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 				tx.Rollback()
 				return
 			}
-			ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
+			ssr, err := APIShipmentStatus(getShipmentServiceURL(r), &APIShipmentStatusReq{
 				ReserveID: shipping.ReserveID,
 			})
 			if err != nil {
@@ -1062,7 +1070,8 @@ func getItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item := Item{}
-	err = dbx.Get(&item, "SELECT * FROM `items` WHERE `id` = ?", itemID)
+	ctx := r.Context()
+	err = dbx.GetContext(ctx, &item, "SELECT * FROM `items` WHERE `id` = ?", itemID)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusNotFound, "item not found")
 		return
@@ -1114,7 +1123,8 @@ func getItem(w http.ResponseWriter, r *http.Request) {
 		itemDetail.Buyer = &buyer
 
 		transactionEvidence := TransactionEvidence{}
-		err = dbx.Get(&transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", item.ID)
+		ctx := r.Context()
+		err = dbx.GetContext(ctx, &transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", item.ID)
 		if err != nil && err != sql.ErrNoRows {
 			// It's able to ignore ErrNoRows
 			log.Print(err)
@@ -1124,7 +1134,8 @@ func getItem(w http.ResponseWriter, r *http.Request) {
 
 		if transactionEvidence.ID > 0 {
 			shipping := Shipping{}
-			err = dbx.Get(&shipping, "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = ?", transactionEvidence.ID)
+			ctx := r.Context()
+			err = dbx.GetContext(ctx, &shipping, "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = ?", transactionEvidence.ID)
 			if err == sql.ErrNoRows {
 				outputErrorMsg(w, http.StatusNotFound, "shipping not found")
 				return
@@ -1175,7 +1186,8 @@ func postItemEdit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetItem := Item{}
-	err = dbx.Get(&targetItem, "SELECT * FROM `items` WHERE `id` = ?", itemID)
+	ctx := r.Context()
+	err = dbx.GetContext(ctx, &targetItem, "SELECT * FROM `items` WHERE `id` = ?", itemID)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusNotFound, "item not found")
 		return
@@ -1255,7 +1267,8 @@ func getQRCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	transactionEvidence := TransactionEvidence{}
-	err = dbx.Get(&transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `id` = ?", transactionEvidenceID)
+	ctx := r.Context()
+	err = dbx.GetContext(ctx, &transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `id` = ?", transactionEvidenceID)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusNotFound, "transaction_evidences not found")
 		return
@@ -1272,7 +1285,7 @@ func getQRCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shipping := Shipping{}
-	err = dbx.Get(&shipping, "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = ?", transactionEvidence.ID)
+	err = dbx.GetContext(ctx, &shipping, "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = ?", transactionEvidence.ID)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusNotFound, "shippings not found")
 		return
@@ -1412,7 +1425,7 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scr, err := APIShipmentCreate(getShipmentServiceURL(), &APIShipmentCreateReq{
+	scr, err := APIShipmentCreate(getShipmentServiceURL(r), &APIShipmentCreateReq{
 		ToAddress:   buyer.Address,
 		ToName:      buyer.AccountName,
 		FromAddress: seller.Address,
@@ -1426,7 +1439,7 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pstr, err := APIPaymentToken(getPaymentServiceURL(), &APIPaymentServiceTokenReq{
+	pstr, err := APIPaymentToken(getPaymentServiceURL(r), &APIPaymentServiceTokenReq{
 		ShopID: PaymentServiceIsucariShopID,
 		Token:  rb.Token,
 		APIKey: PaymentServiceIsucariAPIKey,
@@ -1510,7 +1523,8 @@ func postShip(w http.ResponseWriter, r *http.Request) {
 	}
 
 	transactionEvidence := TransactionEvidence{}
-	err = dbx.Get(&transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", itemID)
+	ctx := r.Context()
+	err = dbx.GetContext(ctx, &transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", itemID)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusNotFound, "transaction_evidences not found")
 		return
@@ -1582,7 +1596,7 @@ func postShip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	img, err := APIShipmentRequest(getShipmentServiceURL(), &APIShipmentRequestReq{
+	img, err := APIShipmentRequest(getShipmentServiceURL(r), &APIShipmentRequestReq{
 		ReserveID: shipping.ReserveID,
 	})
 	if err != nil {
@@ -1641,7 +1655,8 @@ func postShipDone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	transactionEvidence := TransactionEvidence{}
-	err = dbx.Get(&transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", itemID)
+	ctx := r.Context()
+	err = dbx.GetContext(ctx, &transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", itemID)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusNotFound, "transaction_evidence not found")
 		return
@@ -1713,7 +1728,7 @@ func postShipDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
+	ssr, err := APIShipmentStatus(getShipmentServiceURL(r), &APIShipmentStatusReq{
 		ReserveID: shipping.ReserveID,
 	})
 	if err != nil {
@@ -1787,7 +1802,8 @@ func postComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	transactionEvidence := TransactionEvidence{}
-	err = dbx.Get(&transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", itemID)
+	ctx := r.Context()
+	err = dbx.GetContext(ctx, &transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", itemID)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusNotFound, "transaction_evidence not found")
 		return
@@ -1853,7 +1869,7 @@ func postComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
+	ssr, err := APIShipmentStatus(getShipmentServiceURL(r), &APIShipmentStatusReq{
 		ReserveID: shipping.ReserveID,
 	})
 	if err != nil {
@@ -2181,11 +2197,12 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		ress.User = &user
 	}
 
-	ress.PaymentServiceURL = getPaymentServiceURL()
+	ress.PaymentServiceURL = getPaymentServiceURL(r)
 
 	categories := []Category{}
 
-	err := dbx.Select(&categories, "SELECT * FROM `categories`")
+	ctx := r.Context()
+	err := dbx.SelectContext(ctx, &categories, "SELECT * FROM `categories`")
 	if err != nil {
 		log.Print(err)
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
@@ -2215,7 +2232,8 @@ func postLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u := User{}
-	err = dbx.Get(&u, "SELECT * FROM `users` WHERE `account_name` = ?", accountName)
+	ctx := r.Context()
+	err = dbx.GetContext(ctx, &u, "SELECT * FROM `users` WHERE `account_name` = ?", accountName)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusUnauthorized, "アカウント名かパスワードが間違えています")
 		return
@@ -2322,7 +2340,8 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 
 func getReports(w http.ResponseWriter, r *http.Request) {
 	transactionEvidences := make([]TransactionEvidence, 0)
-	err := dbx.Select(&transactionEvidences, "SELECT * FROM `transaction_evidences` WHERE `id` > 15007")
+	ctx := r.Context()
+	err := dbx.SelectContext(ctx, &transactionEvidences, "SELECT * FROM `transaction_evidences` WHERE `id` > 15007")
 	if err != nil {
 		log.Print(err)
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
