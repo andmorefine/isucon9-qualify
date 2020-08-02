@@ -18,9 +18,14 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
+	"github.com/joho/godotenv"
+	_ "github.com/newrelic/go-agent/v3/integrations/nrmysql"
 	goji "goji.io"
 	"goji.io/pat"
 	"golang.org/x/crypto/bcrypt"
+
+	// "sync"
+	"github.com/newrelic/go-agent/v3/newrelic"
 )
 
 const (
@@ -63,6 +68,14 @@ var (
 	templates *template.Template
 	dbx       *sqlx.DB
 	store     sessions.Store
+)
+
+var (
+	app    *newrelic.Application
+	client = &http.Client{
+		Transport: newrelic.NewRoundTripper(nil),
+		Timeout:   time.Duration(10) * time.Second,
+	}
 )
 
 type Config struct {
@@ -278,7 +291,16 @@ func init() {
 	))
 }
 
+func Env_load() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+}
+
 func main() {
+	Env_load()
+
 	host := os.Getenv("MYSQL_HOST")
 	if host == "" {
 		host = "127.0.0.1"
@@ -319,8 +341,17 @@ func main() {
 	}
 	defer dbx.Close()
 
+	app, err = newrelic.NewApplication(
+		newrelic.ConfigAppName("ISUCON9予選問題 (Go)"),
+		newrelic.ConfigLicense(os.Getenv("NEW_RELIC_LICENSE_KEY")),
+		newrelic.ConfigDistributedTracerEnabled(true),
+		newrelic.ConfigDebugLogger(os.Stdout),
+	)
+
 	mux := goji.NewMux()
 
+	// newrelic
+	mux.Use(nrt)
 	// API
 	mux.HandleFunc(pat.Post("/initialize"), postInitialize)
 	mux.HandleFunc(pat.Get("/new_items.json"), getNewItems)
@@ -2314,4 +2345,19 @@ func outputErrorMsg(w http.ResponseWriter, status int, msg string) {
 
 func getImageURL(imageName string) string {
 	return fmt.Sprintf("/upload/%s", imageName)
+}
+
+// Middleware to create/end NewRelic transaction
+func nrt(inner http.Handler) http.Handler {
+	mw := func(w http.ResponseWriter, r *http.Request) {
+		txn := app.StartTransaction(r.URL.Path)
+		defer txn.End()
+
+		r = newrelic.RequestWithTransactionContext(r, txn)
+
+		txn.SetWebRequestHTTP(r)
+		w = txn.SetWebResponse(w)
+		inner.ServeHTTP(w, r)
+	}
+	return http.HandlerFunc(mw)
 }
