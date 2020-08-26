@@ -83,6 +83,13 @@ type Config struct {
 	Val  string `json:"val" db:"val"`
 }
 
+var (
+	config = map[string]string{
+		"payment_service_url":  DefaultPaymentServiceURL,
+		"shipment_service_url": DefaultShipmentServiceURL,
+	}
+)
+
 type User struct {
 	ID             int64     `json:"id" db:"id"`
 	AccountName    string    `json:"account_name" db:"account_name"`
@@ -444,30 +451,20 @@ func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err err
 	return category, err
 }
 
-func getConfigByName(name string, r *http.Request) (string, error) {
-	config := Config{}
-	ctx := r.Context()
-	err := dbx.GetContext(ctx, &config, "SELECT * FROM `configs` WHERE `name` = ?", name)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		log.Print(err)
-		return "", err
-	}
-	return config.Val, err
+func getConfigByName(name string) (string, error) {
+	return config[name], nil
 }
 
-func getPaymentServiceURL(r *http.Request) string {
-	val, _ := getConfigByName("payment_service_url", r)
+func getPaymentServiceURL() string {
+	val, _ := getConfigByName("payment_service_url")
 	if val == "" {
 		return DefaultPaymentServiceURL
 	}
 	return val
 }
 
-func getShipmentServiceURL(r *http.Request) string {
-	val, _ := getConfigByName("shipment_service_url", r)
+func getShipmentServiceURL() string {
+	val, _ := getConfigByName("shipment_service_url")
 	if val == "" {
 		return DefaultShipmentServiceURL
 	}
@@ -500,26 +497,8 @@ func postInitialize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = dbx.Exec(
-		"INSERT INTO `configs` (`name`, `val`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `val` = VALUES(`val`)",
-		"payment_service_url",
-		ri.PaymentServiceURL,
-	)
-	if err != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "db error")
-		return
-	}
-	_, err = dbx.Exec(
-		"INSERT INTO `configs` (`name`, `val`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `val` = VALUES(`val`)",
-		"shipment_service_url",
-		ri.ShipmentServiceURL,
-	)
-	if err != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "db error")
-		return
-	}
+	config["payment_service_url"] = ri.PaymentServiceURL
+	config["shipment_service_url"] = ri.ShipmentServiceURL
 
 	categoryList = make(map[int]*Category)
 	cateArr := []*Category{}
@@ -1026,7 +1005,7 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 				tx.Rollback()
 				return
 			}
-			ssr, err := APIShipmentStatus(getShipmentServiceURL(r), &APIShipmentStatusReq{
+			ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
 				ReserveID: shipping.ReserveID,
 			})
 			if err != nil {
@@ -1431,7 +1410,7 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scr, err := APIShipmentCreate(getShipmentServiceURL(r), &APIShipmentCreateReq{
+	scr, err := APIShipmentCreate(getShipmentServiceURL(), &APIShipmentCreateReq{
 		ToAddress:   buyer.Address,
 		ToName:      buyer.AccountName,
 		FromAddress: seller.Address,
@@ -1445,7 +1424,7 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pstr, err := APIPaymentToken(getPaymentServiceURL(r), &APIPaymentServiceTokenReq{
+	pstr, err := APIPaymentToken(getPaymentServiceURL(), &APIPaymentServiceTokenReq{
 		ShopID: PaymentServiceIsucariShopID,
 		Token:  rb.Token,
 		APIKey: PaymentServiceIsucariAPIKey,
@@ -1602,7 +1581,7 @@ func postShip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	img, err := APIShipmentRequest(getShipmentServiceURL(r), &APIShipmentRequestReq{
+	img, err := APIShipmentRequest(getShipmentServiceURL(), &APIShipmentRequestReq{
 		ReserveID: shipping.ReserveID,
 	})
 	if err != nil {
@@ -1734,7 +1713,7 @@ func postShipDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ssr, err := APIShipmentStatus(getShipmentServiceURL(r), &APIShipmentStatusReq{
+	ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
 		ReserveID: shipping.ReserveID,
 	})
 	if err != nil {
@@ -1875,7 +1854,7 @@ func postComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ssr, err := APIShipmentStatus(getShipmentServiceURL(r), &APIShipmentStatusReq{
+	ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
 		ReserveID: shipping.ReserveID,
 	})
 	if err != nil {
@@ -2203,7 +2182,7 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		ress.User = &user
 	}
 
-	ress.PaymentServiceURL = getPaymentServiceURL(r)
+	ress.PaymentServiceURL = getPaymentServiceURL()
 
 	categories := []Category{}
 
