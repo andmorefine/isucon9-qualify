@@ -309,6 +309,7 @@ func Env_load() {
 }
 
 func main() {
+	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 1000
 	Env_load()
 
 	host := os.Getenv("MYSQL_HOST")
