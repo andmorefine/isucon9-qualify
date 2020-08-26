@@ -6,9 +6,9 @@ require (
 	github.com/go-sql-driver/mysql v1.5.0
 	github.com/gorilla/sessions v1.2.0
 	github.com/jmoiron/sqlx v1.2.0
-	github.com/joho/godotenv v1.3.0 // indirect
-	github.com/newrelic/go-agent/v3 v3.8.1 // indirect
-	github.com/newrelic/go-agent/v3/integrations/nrmysql v1.2.0 // indirect
+	github.com/joho/godotenv v1.3.0
+	github.com/newrelic/go-agent/v3 v3.8.1
+	github.com/newrelic/go-agent/v3/integrations/nrmysql v1.2.0
 	goji.io v2.0.2+incompatible
 	golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4
 )
