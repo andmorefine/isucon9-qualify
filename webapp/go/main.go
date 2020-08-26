@@ -217,8 +217,8 @@ type resUserItems struct {
 }
 
 type resTransactions struct {
-	HasNext bool         `json:"has_next"`
-	Items   []ItemDetail `json:"items"`
+	HasNext bool          `json:"has_next"`
+	Items   []*ItemDetail `json:"items"`
 }
 
 type reqRegister struct {
@@ -1042,7 +1042,8 @@ ORDER BY created_at DESC, items.id DESC LIMIT ?`,
 		}
 	}
 
-	itemDetails := []ItemDetail{}
+	itemDetails := []*ItemDetail{}
+	wg := sync.WaitGroup{}
 	for rows.Next() {
 		item := Item{}
 		teID := sql.NullInt64{}
@@ -1082,7 +1083,7 @@ ORDER BY created_at DESC, items.id DESC LIMIT ?`,
 			return
 		}
 
-		itemDetail := ItemDetail{
+		itemDetail := &ItemDetail{
 			ID:       item.ID,
 			SellerID: item.SellerID,
 			Seller:   &seller,
@@ -1117,24 +1118,28 @@ ORDER BY created_at DESC, items.id DESC LIMIT ?`,
 			teStatusValue := teStatus.String
 			reserveIDValue := reserveID.String
 
-			ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
-				ReserveID: reserveIDValue,
-			})
-			if err != nil {
-				log.Print(err)
-				outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
-				// tx.Rollback()
-				return
-			}
-
 			itemDetail.TransactionEvidenceID = teIDValue
 			itemDetail.TransactionEvidenceStatus = teStatusValue
-			itemDetail.ShippingStatus = ssr.Status
+
+			wg.Add(1)
+			go func() {
+				ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
+					ReserveID: reserveIDValue,
+				})
+				if err != nil {
+					log.Print(err)
+					outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
+					return
+				}
+
+				itemDetail.ShippingStatus = ssr.Status
+				wg.Done()
+			}()
 		}
 
 		itemDetails = append(itemDetails, itemDetail)
 	}
-	// tx.Commit()
+	wg.Wait()
 
 	hasNext := false
 	if len(itemDetails) > TransactionsPerPage {
@@ -1522,29 +1527,42 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scr, err := APIShipmentCreate(getShipmentServiceURL(), &APIShipmentCreateReq{
-		ToAddress:   buyer.Address,
-		ToName:      buyer.AccountName,
-		FromAddress: seller.Address,
-		FromName:    seller.AccountName,
-	})
-	if err != nil {
-		log.Print(err)
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	var scr *APIShipmentCreateRes
+	var shipErr error
+	go func() {
+		scr, shipErr = APIShipmentCreate(getShipmentServiceURL(), &APIShipmentCreateReq{
+			ToAddress:   buyer.Address,
+			ToName:      buyer.AccountName,
+			FromAddress: seller.Address,
+			FromName:    seller.AccountName,
+		})
+		wg.Done()
+	}()
+	var pstr *APIPaymentServiceTokenRes
+	var payErr error
+	go func() {
+		pstr, payErr = APIPaymentToken(getPaymentServiceURL(), &APIPaymentServiceTokenReq{
+			ShopID: PaymentServiceIsucariShopID,
+			Token:  rb.Token,
+			APIKey: PaymentServiceIsucariAPIKey,
+			Price:  targetItem.Price,
+		})
+		wg.Done()
+	}()
+	wg.Wait()
+
+	if shipErr != nil {
+		log.Print(shipErr)
 		outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
 		tx.Rollback()
 
 		return
 	}
 
-	pstr, err := APIPaymentToken(getPaymentServiceURL(), &APIPaymentServiceTokenReq{
-		ShopID: PaymentServiceIsucariShopID,
-		Token:  rb.Token,
-		APIKey: PaymentServiceIsucariAPIKey,
-		Price:  targetItem.Price,
-	})
-	if err != nil {
-		log.Print(err)
-
+	if payErr != nil {
+		log.Print(payErr)
 		outputErrorMsg(w, http.StatusInternalServerError, "payment service is failed")
 		tx.Rollback()
 		return
