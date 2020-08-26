@@ -944,7 +944,7 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tx := dbx.MustBegin()
+	// tx := dbx.MustBegin()
 	var rows *sqlx.Rows
 	if itemID > 0 && createdAt > 0 {
 		// paging
@@ -992,7 +992,7 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Print(err)
 			outputErrorMsg(w, http.StatusInternalServerError, "db error")
-			tx.Rollback()
+			// tx.Rollback()
 			return
 		}
 	} else {
@@ -1036,7 +1036,7 @@ ORDER BY created_at DESC, items.id DESC LIMIT ?`,
 		if err != nil {
 			log.Print(err)
 			outputErrorMsg(w, http.StatusInternalServerError, "db error")
-			tx.Rollback()
+			// tx.Rollback()
 			return
 		}
 	}
@@ -1064,20 +1064,20 @@ ORDER BY created_at DESC, items.id DESC LIMIT ?`,
 		if err != nil {
 			log.Print(err)
 			outputErrorMsg(w, http.StatusInternalServerError, "db error")
-			tx.Rollback()
+			// tx.Rollback()
 			return
 		}
 
-		seller, err := getUserSimpleByID(tx, item.SellerID)
+		seller, err := getUserSimpleByID(dbx, item.SellerID)
 		if err != nil {
 			outputErrorMsg(w, http.StatusNotFound, "seller not found")
-			tx.Rollback()
+			// tx.Rollback()
 			return
 		}
-		category, err := getCategoryByID(tx, item.CategoryID)
+		category, err := getCategoryByID(dbx, item.CategoryID)
 		if err != nil {
 			outputErrorMsg(w, http.StatusNotFound, "category not found")
-			tx.Rollback()
+			// tx.Rollback()
 			return
 		}
 
@@ -1101,10 +1101,10 @@ ORDER BY created_at DESC, items.id DESC LIMIT ?`,
 		}
 
 		if item.BuyerID != 0 {
-			buyer, err := getUserSimpleByID(tx, item.BuyerID)
+			buyer, err := getUserSimpleByID(dbx, item.BuyerID)
 			if err != nil {
 				outputErrorMsg(w, http.StatusNotFound, "buyer not found")
-				tx.Rollback()
+				// tx.Rollback()
 				return
 			}
 			itemDetail.BuyerID = item.BuyerID
@@ -1122,7 +1122,7 @@ ORDER BY created_at DESC, items.id DESC LIMIT ?`,
 			if err != nil {
 				log.Print(err)
 				outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
-				tx.Rollback()
+				// tx.Rollback()
 				return
 			}
 
@@ -1133,7 +1133,7 @@ ORDER BY created_at DESC, items.id DESC LIMIT ?`,
 
 		itemDetails = append(itemDetails, itemDetail)
 	}
-	tx.Commit()
+	// tx.Commit()
 
 	hasNext := false
 	if len(itemDetails) > TransactionsPerPage {
